@@ -149,7 +149,15 @@ app.get("/solicitudes", async (req, res) => {
 
   }
 });
-
+app.get("/test-db", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT NOW()");
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
 app.listen(3000, () => {
   console.log("Servidor iniciado en puerto 3000");
 });
