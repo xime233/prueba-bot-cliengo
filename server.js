@@ -158,6 +158,65 @@ app.get("/test-db", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+app.post("/cliengo/bot", async (req, res) => {
+  try {
+    const { type, dni } = req.body;
+
+    // 🎟️ ENTRADAS
+    if (type === "entradas") {
+      return res.json({
+        message: `🎟️ Entradas Don Osvaldo
+
+📍 Nodo Tecnológico - Santiago del Estero
+💰 Precio: $80.000 (general)
+🏪 Venta: Uquia - Entre Ríos 125
+
+💳 Medios de pago:
+• Efectivo
+• Transferencia
+
+⚠️ Cupos limitados, te recomiendo comprar ahora.
+
+¿Querés reservar? Decime tu nombre y teléfono 😊`
+      });
+    }
+
+    // 👤 SOCIOS
+    if (type === "socio") {
+      const result = await pool.query(
+        "SELECT * FROM socios WHERE dni = $1",
+        [dni]
+      );
+
+      if (result.rows.length === 0) {
+        return res.json({
+          message: "❌ No estás registrado como socio en Uquia."
+        });
+      }
+
+      const socio = result.rows[0];
+
+      return res.json({
+        message: `👤 ${socio.nombre}
+
+Estado: ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}
+Deuda: ${socio.tiene_deuda ? "Sí ⚠️" : "No"}
+Préstamo: ${socio.prestamo_vigente ? "Sí 💰" : "No"}`
+      });
+    }
+
+    // fallback
+    return res.json({
+      message: "Hola 👋 ¿Querés info de entradas o consultar tu estado de socio?"
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: "Error interno"
+    });
+  }
+});
 app.listen(3000, () => {
   console.log("Servidor iniciado en puerto 3000");
 });
