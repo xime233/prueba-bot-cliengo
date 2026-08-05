@@ -136,28 +136,33 @@ app.get("/test-db", async (req, res) => {
 // Endpoint Fulfillment para Cliengo
 app.post("/fulfillment", async (req, res) => {
   try {
-    console.log("========= FULFILLMENT =========");
+    console.log("========= FULFILLMENT REQUEST =========");
     console.log(JSON.stringify(req.body, null, 2));
 
-    // Extraer el último texto enviado por el visitante
+    // Extraer el texto enviado por el usuario
     const chatLog = req.body.chat_log || [];
-    const ultimoMensajeObjeto = chatLog[chatLog.length - 1];
-    const ultimoMensaje = ultimoMensajeObjeto?.text || "";
+    const ultimoMensajeObj = chatLog[chatLog.length - 1];
+    const textoUsuario = ultimoMensajeObj?.text || "";
+    const dniCollected = req.body.collected_data?.idNumber?.value || req.body.collected_data?.dni?.value || "";
+
+    const stringToSearch = `${textoUsuario} ${dniCollected}`;
 
     // Buscar DNI (7 u 8 dígitos)
-    const dniMatch = ultimoMensaje.match(/\b\d{7,8}\b/);
+    const dniMatch = stringToSearch.match(/\b\d{7,8}\b/);
     const dni = dniMatch ? dniMatch[0] : null;
 
     if (!dni) {
       return res.status(200).json({
+        fulfillment_status: "SUCCESS",
         responses: [
           {
-            text: "👋 Hola. Para consultar tu estado de socio, por favor ingresá tu número de DNI."
+            text: "👋 Hola. Para consultar tu estado de socio, por favor escribí tu número de DNI."
           }
         ]
       });
     }
 
+    // Consulta a Neon PostgreSQL
     const result = await pool.query(
       "SELECT * FROM socios WHERE dni = $1",
       [dni]
@@ -165,6 +170,7 @@ app.post("/fulfillment", async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(200).json({
+        fulfillment_status: "SUCCESS",
         responses: [
           {
             text: `❌ No encontramos ningún socio registrado con el DNI ${dni}.`
@@ -175,15 +181,16 @@ app.post("/fulfillment", async (req, res) => {
 
     const socio = result.rows[0];
 
-    const respuestaTexto = `👤 *${socio.nombre}*\n\n` +
+    const textoRespuesta = `👤 *${socio.nombre}*\n\n` +
       `• *Estado:* ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}\n` +
       `• *Deuda:* ${socio.tiene_deuda ? "Sí ⚠️" : "No"}\n` +
       `• *Préstamo vigente:* ${socio.prestamo_vigente ? "Sí 💰" : "No"}`;
 
     return res.status(200).json({
+      fulfillment_status: "SUCCESS",
       responses: [
         {
-          text: respuestaTexto
+          text: textoRespuesta
         }
       ]
     });
@@ -191,9 +198,10 @@ app.post("/fulfillment", async (req, res) => {
   } catch (error) {
     console.error("Error en /fulfillment:", error);
     return res.status(200).json({
+      fulfillment_status: "SUCCESS",
       responses: [
         {
-          text: "⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo más tarde."
+          text: "⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo."
         }
       ]
     });
