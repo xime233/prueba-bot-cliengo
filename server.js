@@ -7,30 +7,25 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Endpoint base
 app.get("/", (req, res) => {
   res.send("API Uquia funcionando");
 });
 
+// Obtener todos los socios
 app.get("/socios", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM socios"
-    );
-
+    const result = await pool.query("SELECT * FROM socios");
     res.json(result.rows);
-
   } catch (error) {
     console.error(error);
-
-    res.status(500).json({
-      error: error.message
-    });
+    res.status(500).json({ error: error.message });
   }
 });
 
+// Verificar estado de socio por DNI
 app.post("/verificar-socio", async (req, res) => {
   try {
-
     const { dni } = req.body;
 
     const result = await pool.query(
@@ -53,27 +48,16 @@ app.post("/verificar-socio", async (req, res) => {
       prestamoVigente: socio.prestamo_vigente,
       nombre: socio.nombre
     });
-
   } catch (error) {
-
     console.error(error);
-
-    res.status(500).json({
-      error: error.message
-    });
-
+    res.status(500).json({ error: error.message });
   }
 });
 
+// Registrar nueva solicitud de préstamo
 app.post("/solicitudes", async (req, res) => {
   try {
-
-    const {
-      nombre,
-      dni,
-      telefono,
-      monto
-    } = req.body;
+    const { nombre, dni, telefono, monto } = req.body;
 
     const socioResult = await pool.query(
       "SELECT * FROM socios WHERE dni = $1",
@@ -114,21 +98,15 @@ app.post("/solicitudes", async (req, res) => {
       mensaje: "Solicitud registrada",
       solicitud: result.rows[0]
     });
-
   } catch (error) {
-
     console.error(error);
-
-    res.status(500).json({
-      error: error.message
-    });
-
+    res.status(500).json({ error: error.message });
   }
 });
 
+// Obtener todas las solicitudes
 app.get("/solicitudes", async (req, res) => {
   try {
-
     const result = await pool.query(
       `
       SELECT *
@@ -138,17 +116,13 @@ app.get("/solicitudes", async (req, res) => {
     );
 
     res.json(result.rows);
-
   } catch (error) {
-
     console.error(error);
-
-    res.status(500).json({
-      error: error.message
-    });
-
+    res.status(500).json({ error: error.message });
   }
 });
+
+// Test de base de datos
 app.get("/test-db", async (req, res) => {
   try {
     const result = await pool.query("SELECT NOW()");
@@ -158,94 +132,71 @@ app.get("/test-db", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-app.post("/cliengo/bot", async (req, res) => {
-  try {
-    const { type, dni } = req.body;
 
-    // 🎟️ ENTRADAS
-    if (type === "entradas") {
-      return res.json({
-        message: `🎟️ Entradas Don Osvaldo
-
-📍 Nodo Tecnológico - Santiago del Estero
-💰 Precio: $80.000 (general)
-🏪 Venta: Uquia - Entre Ríos 125
-
-💳 Medios de pago:
-• Efectivo
-• Transferencia
-
-⚠️ Cupos limitados, te recomiendo comprar ahora.
-
-¿Querés reservar? Decime tu nombre y teléfono 😊`
-      });
-    }
-
-    // 👤 SOCIOS
-    if (type === "socio") {
-      const result = await pool.query(
-        "SELECT * FROM socios WHERE dni = $1",
-        [dni]
-      );
-
-      if (result.rows.length === 0) {
-        return res.json({
-          message: "❌ No estás registrado como socio en Uquia."
-        });
-      }
-
-      const socio = result.rows[0];
-
-      return res.json({
-        message: `👤 ${socio.nombre}
-
-Estado: ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}
-Deuda: ${socio.tiene_deuda ? "Sí ⚠️" : "No"}
-Préstamo: ${socio.prestamo_vigente ? "Sí 💰" : "No"}`
-      });
-    }
-
-    // fallback
-    return res.json({
-      message: "Hola 👋 ¿Querés info de entradas o consultar tu estado de socio?"
-    });
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      message: "Error interno"
-    });
-  }
-});
+// Endpoint Fulfillment para Cliengo
 app.post("/fulfillment", async (req, res) => {
   try {
-
     console.log("========= FULFILLMENT =========");
     console.log(JSON.stringify(req.body, null, 2));
 
-    res.json({
+    // Mensaje del visitante
+    const ultimoMensaje =
+      req.body.chat_log?.[req.body.chat_log.length - 1]?.message || "";
+
+    // DNI de 7 u 8 dígitos
+    const dni = ultimoMensaje.match(/\b\d{7,8}\b/)?.[0];
+
+    if (!dni) {
+      return res.json({
+        response: {
+          text: [
+            "👋 Hola. Para consultar tu estado de socio, escribime tu número de DNI."
+          ],
+          response_type: "TEXT"
+        }
+      });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM socios WHERE dni = $1",
+      [dni]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        response: {
+          text: [
+            "❌ No encontramos un socio registrado con ese DNI."
+          ],
+          response_type: "TEXT"
+        }
+      });
+    }
+
+    const socio = result.rows[0];
+
+    return res.json({
       response: {
         text: [
-          "✅ Fulfillment funcionando correctamente."
+          `👤 ${socio.nombre}\n\nEstado: ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}\n\nDeuda: ${socio.tiene_deuda ? "Sí ⚠️" : "No"}\n\nPréstamo vigente: ${socio.prestamo_vigente ? "Sí 💰" : "No"}`
         ],
         response_type: "TEXT"
       }
     });
 
   } catch (error) {
-
     console.error(error);
-
     res.status(500).json({
       response: {
         text: [
-          "Ocurrió un error."
-        ]
+          "⚠️ Ocurrió un error al consultar el sistema."
+        ],
+        response_type: "TEXT"
       }
     });
-
   }
-}); 
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
