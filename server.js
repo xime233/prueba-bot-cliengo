@@ -217,6 +217,35 @@ Préstamo: ${socio.prestamo_vigente ? "Sí 💰" : "No"}`
     });
   }
 });
+app.post("/fulfillment", async (req, res) => {
+  try {
+
+    console.log("========= FULFILLMENT =========");
+    console.log(JSON.stringify(req.body, null, 2));
+
+    res.json({
+      response: {
+        text: [
+          "✅ Fulfillment funcionando correctamente."
+        ],
+        response_type: "TEXT"
+      }
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      response: {
+        text: [
+          "Ocurrió un error."
+        ]
+      }
+    });
+
+  }
+}); 
 app.listen(3000, () => {
   console.log("Servidor iniciado en puerto 3000");
 });
