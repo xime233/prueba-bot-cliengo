@@ -139,71 +139,77 @@ app.post("/fulfillment", async (req, res) => {
     console.log("========= FULFILLMENT REQUEST =========");
     console.log(JSON.stringify(req.body, null, 2));
 
-    const chatLog = req.body.chat_log || [];
-    const ultimoMensajeObj = chatLog[chatLog.length - 1];
-    const textoMensaje = ultimoMensajeObj?.text || "";
+    const body = req.body || {};
+    const collected = body.collected_data || {};
 
-    const responseLog = req.body.response_log || [];
-    const ultimaRespuestaObj = responseLog[responseLog.length - 1];
-    const textoRespuestaLog = ultimaRespuestaObj?.response || "";
+    // Extraer DNI de todas las ubicaciones posibles que manda Cliengo
+    const customValues = Object.values(collected.custom || {}).join(" ");
+    const idNumberVal = collected.idNumber?.value || "";
+    const dniVal = collected.dni?.value || "";
+    
+    const chatLog = body.chat_log || [];
+    const ultimoMensaje = chatLog[chatLog.length - 1]?.text || "";
 
-    const dniCollected = req.body.collected_data?.idNumber?.value || req.body.collected_data?.dni?.value || "";
+    const responseLog = body.response_log || [];
+    const ultimaRespuesta = responseLog[responseLog.length - 1]?.response || "";
 
-    const textoAnalizar = `${textoMensaje} ${textoRespuestaLog} ${dniCollected}`;
+    const textoTotal = `${customValues} ${idNumberVal} ${dniVal} ${ultimoMensaje} ${ultimaRespuesta}`;
 
-    const dniMatch = textoAnalizar.match(/\b\d{7,8}\b/);
+    // Buscar patrón de 7 u 8 dígitos
+    const dniMatch = textoTotal.match(/\b\d{7,8}\b/);
     const dni = dniMatch ? dniMatch[0] : null;
 
     if (!dni) {
       return res.status(200).json({
         fulfillment_status: "SUCCESS",
         action: "REPLY",
-        messages: ["👋 Hola. Por favor ingresá tu número de DNI."],
-        responses: [{ text: "👋 Hola. Por favor ingresá tu número de DNI." }]
+        messages: ["👋 Por favor, ingresá tu número de DNI para consultar tu estado."],
+        responses: [
+          {
+            text: "👋 Por favor, ingresá tu número de DNI para consultar tu estado."
+          }
+        ]
       });
     }
 
+    // Consulta a la DB en Neon
     const result = await pool.query(
       "SELECT * FROM socios WHERE dni = $1",
       [dni]
     );
 
+    let textoRespuesta = "";
+
     if (result.rows.length === 0) {
-      const msj = `❌ No encontramos ningún socio registrado con el DNI ${dni}.`;
-      return res.status(200).json({
-        fulfillment_status: "SUCCESS",
-        action: "REPLY",
-        messages: [msj],
-        responses: [{ text: msj }]
-      });
+      textoRespuesta = `❌ No encontramos ningún socio registrado con el DNI ${dni}.`;
+    } else {
+      const socio = result.rows[0];
+      textoRespuesta = `👤 *${socio.nombre}*\n\n` +
+        `• *Estado:* ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}\n` +
+        `• *Deuda:* ${socio.tiene_deuda ? "Sí ⚠️" : "No"}\n` +
+        `• *Préstamo vigente:* ${socio.prestamo_vigente ? "Sí 💰" : "No"}`;
     }
 
-    const socio = result.rows[0];
-
-    const respuestaTexto = `👤 *${socio.nombre}*\n\n` +
-      `• *Estado:* ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}\n` +
-      `• *Deuda:* ${socio.tiene_deuda ? "Sí ⚠️" : "No"}\n` +
-      `• *Préstamo vigente:* ${socio.prestamo_vigente ? "Sí 💰" : "No"}`;
-
+    // Devolver respuesta compatible con Cliengo
     return res.status(200).json({
       fulfillment_status: "SUCCESS",
       action: "REPLY",
-      messages: [respuestaTexto],
+      messages: [textoRespuesta],
       responses: [
         {
-          text: respuestaTexto
+          text: textoRespuesta
         }
       ]
     });
 
   } catch (error) {
     console.error("Error en /fulfillment:", error);
-    const errMsj = "⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo.";
+    const msjError = "⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo.";
     return res.status(200).json({
       fulfillment_status: "SUCCESS",
       action: "REPLY",
-      messages: [errMsj],
-      responses: [{ text: errMsj }]
+      messages: [msjError],
+      responses: [{ text: msjError }]
     });
   }
 });
