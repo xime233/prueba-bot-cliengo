@@ -139,21 +139,22 @@ app.post("/fulfillment", async (req, res) => {
     console.log("========= FULFILLMENT =========");
     console.log(JSON.stringify(req.body, null, 2));
 
-    // Mensaje del visitante
-    const ultimoMensaje =
-      req.body.chat_log?.[req.body.chat_log.length - 1]?.message || "";
+    // Extraer el último texto enviado por el visitante
+    const chatLog = req.body.chat_log || [];
+    const ultimoMensajeObjeto = chatLog[chatLog.length - 1];
+    const ultimoMensaje = ultimoMensajeObjeto?.text || "";
 
-    // DNI de 7 u 8 dígitos
-    const dni = ultimoMensaje.match(/\b\d{7,8}\b/)?.[0];
+    // Buscar DNI (7 u 8 dígitos)
+    const dniMatch = ultimoMensaje.match(/\b\d{7,8}\b/);
+    const dni = dniMatch ? dniMatch[0] : null;
 
     if (!dni) {
-      return res.json({
-        response: {
-          text: [
-            "👋 Hola. Para consultar tu estado de socio, escribime tu número de DNI."
-          ],
-          response_type: "TEXT"
-        }
+      return res.status(200).json({
+        responses: [
+          {
+            text: "👋 Hola. Para consultar tu estado de socio, por favor ingresá tu número de DNI."
+          }
+        ]
       });
     }
 
@@ -163,36 +164,38 @@ app.post("/fulfillment", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.json({
-        response: {
-          text: [
-            "❌ No encontramos un socio registrado con ese DNI."
-          ],
-          response_type: "TEXT"
-        }
+      return res.status(200).json({
+        responses: [
+          {
+            text: `❌ No encontramos ningún socio registrado con el DNI ${dni}.`
+          }
+        ]
       });
     }
 
     const socio = result.rows[0];
 
-    return res.json({
-      response: {
-        text: [
-          `👤 ${socio.nombre}\n\nEstado: ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}\n\nDeuda: ${socio.tiene_deuda ? "Sí ⚠️" : "No"}\n\nPréstamo vigente: ${socio.prestamo_vigente ? "Sí 💰" : "No"}`
-        ],
-        response_type: "TEXT"
-      }
+    const respuestaTexto = `👤 *${socio.nombre}*\n\n` +
+      `• *Estado:* ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}\n` +
+      `• *Deuda:* ${socio.tiene_deuda ? "Sí ⚠️" : "No"}\n` +
+      `• *Préstamo vigente:* ${socio.prestamo_vigente ? "Sí 💰" : "No"}`;
+
+    return res.status(200).json({
+      responses: [
+        {
+          text: respuestaTexto
+        }
+      ]
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      response: {
-        text: [
-          "⚠️ Ocurrió un error al consultar el sistema."
-        ],
-        response_type: "TEXT"
-      }
+    console.error("Error en /fulfillment:", error);
+    return res.status(200).json({
+      responses: [
+        {
+          text: "⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo más tarde."
+        }
+      ]
     });
   }
 });
