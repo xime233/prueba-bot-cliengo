@@ -133,26 +133,29 @@ app.get("/test-db", async (req, res) => {
   }
 });
 
-// Endpoint Fulfillment Nativo de Cliengo
+// Endpoint Fulfillment Nativo de Cliengo (Corregido y Blindado)
 app.post("/fulfillment", async (req, res) => {
   try {
     console.log("========= FULFILLMENT REQUEST =========");
     console.log(JSON.stringify(req.body, null, 2));
 
     const body = req.body || {};
-    const collected = body.collected_data || {};
 
-    // 1. Extraer el DNI desde collected_data o chat_log
-    const customValues = Object.values(collected.custom || {}).join(" ");
+    // Extracción ultra flexible del texto o DNI mandado por el usuario o el bot
+    const currentAnswer = body.currentAnswer || "";
+    const textMsg = body.text || body.message || "";
+    const collected = body.collected_data || {};
+    const customValues = typeof collected.custom === 'object' ? Object.values(collected.custom || {}).join(" ") : "";
     const idNumberVal = collected.idNumber?.value || "";
     const dniVal = collected.dni?.value || "";
 
-    const chatLog = body.chat_log || [];
-    const ultimoMensaje = chatLog[chatLog.length - 1]?.message || chatLog[chatLog.length - 1]?.text || "";
+    const chatLog = Array.isArray(body.chat_log) ? body.chat_log : [];
+    const ultimoMensaje = chatLog.length > 0 ? (chatLog[chatLog.length - 1]?.message || chatLog[chatLog.length - 1]?.text || "") : "";
 
-    const textoTotal = `${customValues} ${idNumberVal} ${dniVal} ${ultimoMensaje}`;
+    // Unimos todo para buscar coincidencias de DNI en cualquier parte del payload
+    const textoTotal = `${currentAnswer} ${textMsg} ${customValues} ${idNumberVal} ${dniVal} ${ultimoMensaje}`;
 
-    // Buscar patrón de 7 u 8 dígitos
+    // Buscar patrón de 7 u 8 dígitos correspondientes a un DNI
     const dniMatch = textoTotal.match(/\b\d{7,8}\b/);
     const dni = dniMatch ? dniMatch[0] : null;
 
@@ -166,7 +169,7 @@ app.post("/fulfillment", async (req, res) => {
       });
     }
 
-    // 2. Consulta a PostgreSQL
+    // Consulta a PostgreSQL con el DNI encontrado
     const result = await pool.query(
       "SELECT * FROM socios WHERE dni = $1",
       [dni]
@@ -184,7 +187,7 @@ app.post("/fulfillment", async (req, res) => {
         `• *Préstamo vigente:* ${socio.prestamo_vigente ? "Sí 💰" : "No"}`;
     }
 
-    // 3. Respuesta con el Contrato Exacto de Fulfillment Nativo
+    // Respuesta con el Contrato Exacto de Fulfillment Nativo
     return res.status(200).json({
       response: {
         text: [textoRespuesta],
@@ -198,10 +201,9 @@ app.post("/fulfillment", async (req, res) => {
 
   } catch (error) {
     console.error("Error en /fulfillment:", error);
-    const msjError = "⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo.";
     return res.status(200).json({
       response: {
-        text: [msjError],
+        text: ["⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo."],
         response_type: "TEXT",
         stopChat: false
       }
