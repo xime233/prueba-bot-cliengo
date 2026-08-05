@@ -133,7 +133,7 @@ app.get("/test-db", async (req, res) => {
   }
 });
 
-// Endpoint Fulfillment para Cliengo
+// Endpoint Fulfillment Nativo de Cliengo
 app.post("/fulfillment", async (req, res) => {
   try {
     console.log("========= FULFILLMENT REQUEST =========");
@@ -142,18 +142,15 @@ app.post("/fulfillment", async (req, res) => {
     const body = req.body || {};
     const collected = body.collected_data || {};
 
-    // Extraer DNI de todas las ubicaciones posibles que manda Cliengo
+    // 1. Extraer el DNI desde collected_data o chat_log
     const customValues = Object.values(collected.custom || {}).join(" ");
     const idNumberVal = collected.idNumber?.value || "";
     const dniVal = collected.dni?.value || "";
-    
+
     const chatLog = body.chat_log || [];
-    const ultimoMensaje = chatLog[chatLog.length - 1]?.text || "";
+    const ultimoMensaje = chatLog[chatLog.length - 1]?.message || chatLog[chatLog.length - 1]?.text || "";
 
-    const responseLog = body.response_log || [];
-    const ultimaRespuesta = responseLog[responseLog.length - 1]?.response || "";
-
-    const textoTotal = `${customValues} ${idNumberVal} ${dniVal} ${ultimoMensaje} ${ultimaRespuesta}`;
+    const textoTotal = `${customValues} ${idNumberVal} ${dniVal} ${ultimoMensaje}`;
 
     // Buscar patrón de 7 u 8 dígitos
     const dniMatch = textoTotal.match(/\b\d{7,8}\b/);
@@ -161,18 +158,15 @@ app.post("/fulfillment", async (req, res) => {
 
     if (!dni) {
       return res.status(200).json({
-        fulfillment_status: "SUCCESS",
-        action: "REPLY",
-        messages: ["👋 Por favor, ingresá tu número de DNI para consultar tu estado."],
-        responses: [
-          {
-            text: "👋 Por favor, ingresá tu número de DNI para consultar tu estado."
-          }
-        ]
+        response: {
+          text: ["👋 Por favor, ingresá tu número de DNI para consultar tu estado."],
+          response_type: "TEXT",
+          stopChat: false
+        }
       });
     }
 
-    // Consulta a la DB en Neon
+    // 2. Consulta a PostgreSQL
     const result = await pool.query(
       "SELECT * FROM socios WHERE dni = $1",
       [dni]
@@ -190,26 +184,27 @@ app.post("/fulfillment", async (req, res) => {
         `• *Préstamo vigente:* ${socio.prestamo_vigente ? "Sí 💰" : "No"}`;
     }
 
-    // Devolver respuesta compatible con Cliengo
+    // 3. Respuesta con el Contrato Exacto de Fulfillment Nativo
     return res.status(200).json({
-      fulfillment_status: "SUCCESS",
-      action: "REPLY",
-      messages: [textoRespuesta],
-      responses: [
-        {
-          text: textoRespuesta
-        }
-      ]
+      response: {
+        text: [textoRespuesta],
+        response_type: "TEXT",
+        stopChat: false
+      },
+      custom: {
+        dni_consultado: dni
+      }
     });
 
   } catch (error) {
     console.error("Error en /fulfillment:", error);
     const msjError = "⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo.";
     return res.status(200).json({
-      fulfillment_status: "SUCCESS",
-      action: "REPLY",
-      messages: [msjError],
-      responses: [{ text: msjError }]
+      response: {
+        text: [msjError],
+        response_type: "TEXT",
+        stopChat: false
+      }
     });
   }
 });
