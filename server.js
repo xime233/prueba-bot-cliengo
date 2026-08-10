@@ -8,6 +8,7 @@ app.use(express.json());
 
 // URL base oficial provista por la documentación
 const UQUIA_API_BASE = 'https://api.uquia.com.ar/api/external';
+const UQUIA_AUTH_URL = 'https://api.uquia.com.ar/api/login';
 
 app.post("/fulfillment", async (req, res) => {
   try {
@@ -41,24 +42,32 @@ app.post("/fulfillment", async (req, res) => {
       });
     }
 
-    // 1. Consultar cliente por DNI usando la ruta oficial: GET /api/external/clientes/get-by-dni
+    // 1. Obtener token fresco automáticamente mediante el login de administrador
+    const loginRes = await axios.post(UQUIA_AUTH_URL, {
+      email: "admin@uquia.com.ar",
+      password: "uquia4321$"
+    });
+
+    const accessToken = loginRes.data.access_token;
+
+    // 2. Consultar cliente por DNI usando la ruta oficial con el token obtenido
     const apiResponse = await axios.get(`${UQUIA_API_BASE}/clientes/get-by-dni`, {
       params: { dni: dni },
       headers: {
-        'Authorization': `Bearer ${process.env.UQUIA_API_TOKEN}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       }
     });
 
-    const cliente = apiResponse.data;
+    const cliente = apiResponse.data?.data || apiResponse.data;
     let textoRespuesta = "";
 
     if (!cliente) {
       textoRespuesta = `❌ No encontramos ningún socio registrado con el DNI ${dni}.`;
     } else {
       // Tomamos los datos que devuelve la API oficial
-      const nombreCompleto = `${cliente.nombre || ''} ${cliente.apellido || ''}`.trim() || 'Socio';
+      const nombreCompleto = cliente.nombre_completo || `${cliente.nombre || ''} ${cliente.apellido || ''}`.trim() || 'Socio';
       const esActivo = cliente.activo !== undefined ? cliente.activo : (cliente.estado_cliente_id === 1);
 
       textoRespuesta = `👤 *${nombreCompleto}*\n\n` +
@@ -80,7 +89,6 @@ app.post("/fulfillment", async (req, res) => {
   } catch (error) {
     console.error("Error al consultar la API de Uquia:", error.response?.status, error.response?.data || error.message);
     
-    // Si la API responde 404 u otro error controlable
     let mensajeError = "⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo.";
     if (error.response?.status === 404) {
       mensajeError = `❌ No se encontró ningún registro para el DNI ingresado.`;
