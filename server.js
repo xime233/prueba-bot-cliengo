@@ -1,139 +1,21 @@
 const express = require("express");
 const cors = require("cors");
-const pool = require("./db");
+const axios = require("axios"); // Importamos axios para consumir la API externa
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+// URL base de la API oficial del backend de Uquia
+const UQUIA_API_BASE = 'https://api.uquia.com.ar/api/external';
+
 // Endpoint base
 app.get("/", (req, res) => {
-  res.send("API Uquia funcionando");
+  res.send("API Intermediaria Uquia funcionando con API Oficial");
 });
 
-// Obtener todos los socios
-app.get("/socios", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM socios");
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Verificar estado de socio por DNI
-app.post("/verificar-socio", async (req, res) => {
-  try {
-    const { dni } = req.body;
-
-    const result = await pool.query(
-      "SELECT * FROM socios WHERE dni = $1",
-      [dni]
-    );
-
-    if (result.rows.length === 0) {
-      return res.json({
-        socio: false,
-        mensaje: "No encontrado"
-      });
-    }
-
-    const socio = result.rows[0];
-
-    res.json({
-      socio: socio.socio_activo,
-      deuda: socio.tiene_deuda,
-      prestamoVigente: socio.prestamo_vigente,
-      nombre: socio.nombre
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Registrar nueva solicitud de préstamo
-app.post("/solicitudes", async (req, res) => {
-  try {
-    const { nombre, dni, telefono, monto } = req.body;
-
-    const socioResult = await pool.query(
-      "SELECT * FROM socios WHERE dni = $1",
-      [dni]
-    );
-
-    if (socioResult.rows.length === 0) {
-      return res.status(400).json({
-        mensaje: "El DNI no pertenece a un socio"
-      });
-    }
-
-    const socio = socioResult.rows[0];
-
-    if (socio.tiene_deuda) {
-      return res.status(400).json({
-        mensaje: "El socio posee deuda pendiente"
-      });
-    }
-
-    if (socio.prestamo_vigente) {
-      return res.status(400).json({
-        mensaje: "El socio ya posee un préstamo vigente"
-      });
-    }
-
-    const result = await pool.query(
-      `
-      INSERT INTO solicitudes_prestamo
-      (nombre, dni, telefono, monto)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-      `,
-      [nombre, dni, telefono, monto]
-    );
-
-    res.status(201).json({
-      mensaje: "Solicitud registrada",
-      solicitud: result.rows[0]
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Obtener todas las solicitudes
-app.get("/solicitudes", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM solicitudes_prestamo
-      ORDER BY created_at DESC
-      `
-    );
-
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Test de base de datos
-app.get("/test-db", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Endpoint Fulfillment Nativo de Cliengo (Corregido y Blindado)
+// Endpoint Fulfillment Nativo de Cliengo adaptado para consumir la API del Back
 app.post("/fulfillment", async (req, res) => {
   try {
     console.log("========= FULFILLMENT REQUEST =========");
@@ -169,22 +51,24 @@ app.post("/fulfillment", async (req, res) => {
       });
     }
 
-    // Consulta a PostgreSQL con el DNI encontrado
-    const result = await pool.query(
-      "SELECT * FROM socios WHERE dni = $1",
-      [dni]
-    );
+    // Consulta a la API OFICIAL DEL BACKEND (en vez de Neon) usando el token de Render
+    const apiResponse = await axios.get(`${UQUIA_API_BASE}/clientes/get-by-dni`, {
+      params: { dni: dni },
+      headers: {
+        'Authorization': `Bearer ${process.env.UQUIA_API_TOKEN}`
+      }
+    });
 
+    const cliente = apiResponse.data;
     let textoRespuesta = "";
 
-    if (result.rows.length === 0) {
+    if (!cliente) {
       textoRespuesta = `❌ No encontramos ningún socio registrado con el DNI ${dni}.`;
     } else {
-      const socio = result.rows[0];
-      textoRespuesta = `👤 *${socio.nombre}*\n\n` +
-        `• *Estado:* ${socio.socio_activo ? "Activo 🟢" : "Inactivo 🔴"}\n` +
-        `• *Deuda:* ${socio.tiene_deuda ? "Sí ⚠️" : "No"}\n` +
-        `• *Préstamo vigente:* ${socio.prestamo_vigente ? "Sí 💰" : "No"}`;
+      textoRespuesta = `👤 *${cliente.nombre || 'Socio'}*\n\n` +
+        `• *Estado:* ${cliente.activo ? "Activo 🟢" : "Inactivo 🔴"}\n` +
+        `• *Deuda:* ${cliente.tiene_deuda ? "Sí ⚠️" : "No"}\n` +
+        `• *Préstamo vigente:* ${cliente.prestamo_vigente ? "Sí 💰" : "No"}`;
     }
 
     // Respuesta con el Contrato Exacto de Fulfillment Nativo
@@ -200,10 +84,10 @@ app.post("/fulfillment", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error en /fulfillment:", error);
+    console.error("Error al consultar la API oficial en /fulfillment:", error.response?.data || error.message);
     return res.status(200).json({
       response: {
-        text: ["⚠️ Ocurrió un error al consultar la base de datos. Intentá de nuevo."],
+        text: ["⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo."],
         response_type: "TEXT",
         stopChat: false
       }
@@ -214,5 +98,5 @@ app.post("/fulfillment", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
+  console.log(`🚀 Servidor intermediario iniciado en puerto ${PORT}`);
 });
