@@ -1,21 +1,14 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios"); // Importamos axios para consumir la API externa
+const axios = require("axios");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-// URL base de la API oficial del backend de Uquia
+// URL base oficial provista por la documentación
 const UQUIA_API_BASE = 'https://api.uquia.com.ar/api/external';
 
-// Endpoint base
-app.get("/", (req, res) => {
-  res.send("API Intermediaria Uquia funcionando con API Oficial");
-});
-
-// Endpoint Fulfillment Nativo de Cliengo adaptado para consumir la API del Back
 app.post("/fulfillment", async (req, res) => {
   try {
     console.log("========= FULFILLMENT REQUEST =========");
@@ -23,7 +16,7 @@ app.post("/fulfillment", async (req, res) => {
 
     const body = req.body || {};
 
-    // Extracción ultra flexible del texto o DNI mandado por el usuario o el bot
+    // Extracción flexible del DNI desde el chat de Cliengo
     const currentAnswer = body.currentAnswer || "";
     const textMsg = body.text || body.message || "";
     const collected = body.collected_data || {};
@@ -34,28 +27,27 @@ app.post("/fulfillment", async (req, res) => {
     const chatLog = Array.isArray(body.chat_log) ? body.chat_log : [];
     const ultimoMensaje = chatLog.length > 0 ? (chatLog[chatLog.length - 1]?.message || chatLog[chatLog.length - 1]?.text || "") : "";
 
-    // Unimos todo para buscar coincidencias de DNI en cualquier parte del payload
     const textoTotal = `${currentAnswer} ${textMsg} ${customValues} ${idNumberVal} ${dniVal} ${ultimoMensaje}`;
-
-    // Buscar patrón de 7 u 8 dígitos correspondientes a un DNI
     const dniMatch = textoTotal.match(/\b\d{7,8}\b/);
     const dni = dniMatch ? dniMatch[0] : null;
 
     if (!dni) {
       return res.status(200).json({
         response: {
-          text: ["👋 Por favor, ingresá tu número de DNI para consultar tu estado."],
+          text: ["👋 Por favor, ingresá tu número de DNI (7 u 8 dígitos) para consultar tu estado."],
           response_type: "TEXT",
           stopChat: false
         }
       });
     }
 
-    // Consulta a la API OFICIAL DEL BACKEND (en vez de Neon) usando el token de Render
+    // 1. Consultar cliente por DNI usando la ruta oficial: GET /api/external/clientes/get-by-dni
     const apiResponse = await axios.get(`${UQUIA_API_BASE}/clientes/get-by-dni`, {
       params: { dni: dni },
       headers: {
-        'Authorization': `Bearer ${process.env.UQUIA_API_TOKEN}`
+        'Authorization': `Bearer ${process.env.UQUIA_API_TOKEN}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       }
     });
 
@@ -65,13 +57,15 @@ app.post("/fulfillment", async (req, res) => {
     if (!cliente) {
       textoRespuesta = `❌ No encontramos ningún socio registrado con el DNI ${dni}.`;
     } else {
-      textoRespuesta = `👤 *${cliente.nombre || 'Socio'}*\n\n` +
-        `• *Estado:* ${cliente.activo ? "Activo 🟢" : "Inactivo 🔴"}\n` +
-        `• *Deuda:* ${cliente.tiene_deuda ? "Sí ⚠️" : "No"}\n` +
-        `• *Préstamo vigente:* ${cliente.prestamo_vigente ? "Sí 💰" : "No"}`;
+      // Tomamos los datos que devuelve la API oficial
+      const nombreCompleto = `${cliente.nombre || ''} ${cliente.apellido || ''}`.trim() || 'Socio';
+      const esActivo = cliente.activo !== undefined ? cliente.activo : (cliente.estado_cliente_id === 1);
+
+      textoRespuesta = `👤 *${nombreCompleto}*\n\n` +
+        `• *Estado:* ${esActivo ? "Activo 🟢" : "Inactivo 🔴"}`;
     }
 
-    // Respuesta con el Contrato Exacto de Fulfillment Nativo
+    // Respuesta con el contrato nativo de Cliengo
     return res.status(200).json({
       response: {
         text: [textoRespuesta],
@@ -84,10 +78,17 @@ app.post("/fulfillment", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error al consultar la API oficial en /fulfillment:", error.response?.data || error.message);
+    console.error("Error al consultar la API de Uquia:", error.response?.status, error.response?.data || error.message);
+    
+    // Si la API responde 404 u otro error controlable
+    let mensajeError = "⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo.";
+    if (error.response?.status === 404) {
+      mensajeError = `❌ No se encontró ningún registro para el DNI ingresado.`;
+    }
+
     return res.status(200).json({
       response: {
-        text: ["⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo."],
+        text: [mensajeError],
         response_type: "TEXT",
         stopChat: false
       }
@@ -95,8 +96,7 @@ app.post("/fulfillment", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor intermediario iniciado en puerto ${PORT}`);
 });
