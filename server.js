@@ -2,7 +2,6 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const dns = require("dns");
-const https = require("https");
 
 dns.setDefaultResultOrder("ipv4first");
 
@@ -11,7 +10,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const UQUIA_API_BASE = "https://api.uquia.com.ar/api/external";
+const UQUIA_API_BASE =
+  "https://api.uquia.com.ar/api/external";
 
 
 /*
@@ -35,7 +35,9 @@ TEST DNS
 */
 
 app.get("/test-dns", async (req, res) => {
+
   try {
+
     const dnsPromises = require("dns").promises;
 
     const result = await dnsPromises.lookup(
@@ -46,8 +48,9 @@ app.get("/test-dns", async (req, res) => {
     );
 
     console.log("=================================");
-    console.log("DNS UQUIA DESDE RENDER");
+    console.log("DNS UQUIA");
     console.log("=================================");
+
     console.log(result);
 
     return res.status(200).json({
@@ -58,158 +61,16 @@ app.get("/test-dns", async (req, res) => {
 
   } catch (error) {
 
-    console.error("ERROR DNS UQUIA:", error);
+    console.error(
+      "ERROR DNS:",
+      error.message
+    );
 
     return res.status(500).json({
       ok: false,
       message: error.message,
       code: error.code || null
     });
-  }
-});
-
-
-/*
-====================================================
-TEST CONEXIÓN DIRECTA A IP
-====================================================
-
-IMPORTANTE:
-Esta es solamente una prueba.
-
-Forzamos temporalmente la IP 77.37.85.203,
-que desde tu computadora respondió correctamente.
-
-El hostname HTTPS sigue siendo:
-api.uquia.com.ar
-====================================================
-*/
-
-app.get("/test-ip", async (req, res) => {
-
-  try {
-
-    console.log("=================================");
-    console.log("TEST IP DIRECTA UQUIA");
-    console.log("=================================");
-
-    const response = await axios.get(
-      `${UQUIA_API_BASE}/clientes/get-by-dni`,
-      {
-        params: {
-          dni: "4272880"
-        },
-
-        headers: {
-          Authorization:
-            `Bearer ${process.env.UQUIA_API_TOKEN}`,
-
-          Accept:
-            "application/json",
-
-          "Content-Type":
-            "application/json"
-        },
-
-        timeout: 15000,
-
-        httpsAgent: new https.Agent({
-
-          lookup: (
-            hostname,
-            options,
-            callback
-          ) => {
-
-            console.log(
-              "Forzando conexión a:",
-              "77.37.85.203"
-            );
-
-            callback(
-              null,
-              "77.37.85.203",
-              4
-            );
-          }
-
-        })
-      }
-    );
-
-
-    console.log(
-      "Status:",
-      response.status
-    );
-
-    console.log(
-      "Respuesta:",
-      JSON.stringify(
-        response.data,
-        null,
-        2
-      )
-    );
-
-
-    return res.status(200).json({
-
-      ok: true,
-
-      status:
-        response.status,
-
-      data:
-        response.data
-
-    });
-
-
-  } catch (error) {
-
-    console.error("=================================");
-    console.error("ERROR TEST IP UQUIA");
-    console.error("=================================");
-
-    console.error(
-      "Mensaje:",
-      error.message
-    );
-
-    console.error(
-      "Código:",
-      error.code
-    );
-
-    console.error(
-      "Status:",
-      error.response?.status
-    );
-
-    console.error(
-      "Respuesta:",
-      error.response?.data
-    );
-
-
-    return res.status(500).json({
-
-      ok: false,
-
-      message:
-        error.message,
-
-      code:
-        error.code || null,
-
-      status:
-        error.response?.status || null,
-
-      data:
-        error.response?.data || null
-
-    });
 
   }
 
@@ -218,19 +79,21 @@ app.get("/test-ip", async (req, res) => {
 
 /*
 ====================================================
-TEST DNI NORMAL
+TEST NORMAL UQUIA
 ====================================================
 */
 
 app.get("/test-dni", async (req, res) => {
 
-  try {
+  const dni = "4272880";
 
-    const dni = "4272880";
+  try {
 
     console.log("=================================");
     console.log("TEST DNI UQUIA");
     console.log("=================================");
+
+    console.log("DNI:", dni);
 
     console.log(
       "URL:",
@@ -238,9 +101,12 @@ app.get("/test-dni", async (req, res) => {
     );
 
     console.log(
-      "DNI:",
-      dni
+      "TOKEN:",
+      process.env.UQUIA_API_TOKEN
+        ? "CONFIGURADO"
+        : "NO CONFIGURADO"
     );
+
 
     const response = await axios.get(
       `${UQUIA_API_BASE}/clientes/get-by-dni`,
@@ -263,10 +129,24 @@ app.get("/test-dni", async (req, res) => {
 
         },
 
-        timeout:
-          15000
+        timeout: 15000
 
       }
+    );
+
+
+    console.log(
+      "STATUS:",
+      response.status
+    );
+
+    console.log(
+      "DATA:",
+      JSON.stringify(
+        response.data,
+        null,
+        2
+      )
     );
 
 
@@ -360,6 +240,12 @@ app.post("/fulfillment", async (req, res) => {
       req.body || {};
 
 
+    /*
+    -----------------------------------------------
+    DATOS RECIBIDOS
+    -----------------------------------------------
+    */
+
     const currentAnswer =
       body.currentAnswer || "";
 
@@ -374,6 +260,12 @@ app.post("/fulfillment", async (req, res) => {
       body.collected_data || {};
 
 
+    /*
+    -----------------------------------------------
+    CUSTOM
+    -----------------------------------------------
+    */
+
     const customValues =
       typeof collected.custom === "object"
         ? Object.values(
@@ -381,6 +273,12 @@ app.post("/fulfillment", async (req, res) => {
           ).join(" ")
         : "";
 
+
+    /*
+    -----------------------------------------------
+    DNI
+    -----------------------------------------------
+    */
 
     const idNumberVal =
       collected.idNumber?.value ||
@@ -391,6 +289,12 @@ app.post("/fulfillment", async (req, res) => {
       collected.dni?.value ||
       "";
 
+
+    /*
+    -----------------------------------------------
+    CHAT LOG
+    -----------------------------------------------
+    */
 
     const chatLog =
       Array.isArray(body.chat_log)
@@ -414,6 +318,12 @@ app.post("/fulfillment", async (req, res) => {
         : "";
 
 
+    /*
+    -----------------------------------------------
+    TEXTO COMPLETO
+    -----------------------------------------------
+    */
+
     const textoTotal = `
       ${currentAnswer}
       ${textMsg}
@@ -425,7 +335,10 @@ app.post("/fulfillment", async (req, res) => {
 
 
     console.log(
-      "Texto analizado:",
+      "Texto analizado:"
+    );
+
+    console.log(
       textoTotal
     );
 
@@ -453,6 +366,12 @@ app.post("/fulfillment", async (req, res) => {
       dni
     );
 
+
+    /*
+    -----------------------------------------------
+    NO HAY DNI
+    -----------------------------------------------
+    */
 
     if (!dni) {
 
@@ -484,7 +403,20 @@ app.post("/fulfillment", async (req, res) => {
     */
 
     console.log(
-      "Consultando Uquía..."
+      "================================="
+    );
+
+    console.log(
+      "CONSULTANDO UQUIA"
+    );
+
+    console.log(
+      "DNI:",
+      dni
+    );
+
+    console.log(
+      "================================="
     );
 
 
@@ -502,10 +434,10 @@ app.post("/fulfillment", async (req, res) => {
             Authorization:
               `Bearer ${process.env.UQUIA_API_TOKEN}`,
 
-            "Content-Type":
+            Accept:
               "application/json",
 
-            Accept:
+            "Content-Type":
               "application/json"
 
           },
@@ -517,8 +449,17 @@ app.post("/fulfillment", async (req, res) => {
       );
 
 
+    /*
+    -----------------------------------------------
+    RESPUESTA UQUIA
+    -----------------------------------------------
+    */
+
     console.log(
-      "Respuesta API Uquía:",
+      "Respuesta UQUIA:"
+    );
+
+    console.log(
       JSON.stringify(
         apiResponse.data,
         null,
@@ -536,12 +477,27 @@ app.post("/fulfillment", async (req, res) => {
       "";
 
 
+    /*
+    -----------------------------------------------
+    NO ENCONTRADO
+    -----------------------------------------------
+    */
+
     if (!cliente) {
 
       textoRespuesta =
         `❌ No encontramos ningún socio registrado con el DNI ${dni}.`;
 
-    } else {
+    }
+
+
+    /*
+    -----------------------------------------------
+    ENCONTRADO
+    -----------------------------------------------
+    */
+
+    else {
 
       const nombreCompleto =
 
@@ -577,6 +533,12 @@ app.post("/fulfillment", async (req, res) => {
     }
 
 
+    /*
+    -----------------------------------------------
+    RESPUESTA CLIENGO
+    -----------------------------------------------
+    */
+
     return res.status(200).json({
 
       response: {
@@ -605,17 +567,9 @@ app.post("/fulfillment", async (req, res) => {
 
   } catch (error) {
 
-    console.error(
-      "================================="
-    );
-
-    console.error(
-      "ERROR AL CONSULTAR API UQUIA"
-    );
-
-    console.error(
-      "================================="
-    );
+    console.error("=================================");
+    console.error("ERROR AL CONSULTAR API UQUIA");
+    console.error("=================================");
 
     console.error(
       "Mensaje:",
@@ -642,15 +596,11 @@ app.post("/fulfillment", async (req, res) => {
       "⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo.";
 
 
-    if (
-      error.response?.status === 404
-    ) {
-
-      mensajeError =
-        "❌ No se encontró ningún registro para el DNI ingresado.";
-
-    }
-
+    /*
+    -----------------------------------------------
+    401
+    -----------------------------------------------
+    */
 
     if (
       error.response?.status === 401
@@ -662,6 +612,12 @@ app.post("/fulfillment", async (req, res) => {
     }
 
 
+    /*
+    -----------------------------------------------
+    403
+    -----------------------------------------------
+    */
+
     if (
       error.response?.status === 403
     ) {
@@ -671,6 +627,28 @@ app.post("/fulfillment", async (req, res) => {
 
     }
 
+
+    /*
+    -----------------------------------------------
+    404
+    -----------------------------------------------
+    */
+
+    if (
+      error.response?.status === 404
+    ) {
+
+      mensajeError =
+        `❌ No se encontró ningún registro para el DNI ingresado.`;
+
+    }
+
+
+    /*
+    -----------------------------------------------
+    ERRORES DE CONEXIÓN
+    -----------------------------------------------
+    */
 
     if (
       error.code === "ETIMEDOUT" ||
@@ -684,6 +662,12 @@ app.post("/fulfillment", async (req, res) => {
 
     }
 
+
+    /*
+    -----------------------------------------------
+    RESPUESTA CLIENGO
+    -----------------------------------------------
+    */
 
     return res.status(200).json({
 
@@ -745,10 +729,10 @@ app.listen(
     );
 
     console.log(
-      "Token configurado:",
+      "Token:",
       process.env.UQUIA_API_TOKEN
-        ? "SÍ"
-        : "NO"
+        ? "CONFIGURADO"
+        : "NO CONFIGURADO"
     );
 
   }
