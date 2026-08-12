@@ -6,10 +6,73 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// URL base oficial provista por la documentación
+// ===== Configuración =====
 const UQUIA_API_BASE = 'https://api.uquia.com.ar/api/external';
-const UQUIA_AUTH_URL = 'https://api.uquia.com.ar/api/login';
+const UQUIA_LOGIN_URL = 'https://api.uquia.com.ar/api/login';
+const UQUIA_INTEGRATIONS_URL = 'https://api.uquia.com.ar/api/integrations';
+const INTEGRATION_ID = 1; // ID de la integración "ClienGo"
+const INTEGRATION_NAME = "ClienGo";
 
+// Credenciales de admin: SIEMPRE por variable de entorno, nunca hardcodeadas
+const ADMIN_EMAIL = process.env.UQUIA_ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.UQUIA_ADMIN_PASSWORD;
+
+// Token de integración de ClienGo, en memoria (se renueva solo)
+let cliengoToken = null;
+let tokenExpiresAt = null; // timestamp en ms
+
+// ===== Rotación de token de integración =====
+async function rotarTokenCliengo() {
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+    console.error("⚠️ Faltan UQUIA_ADMIN_EMAIL / UQUIA_ADMIN_PASSWORD en el entorno. No se puede rotar el token.");
+    return;
+  }
+
+  try {
+    // 1. Login de admin (solo para poder rotar, no para consultar clientes)
+    const loginRes = await axios.post(UQUIA_LOGIN_URL, {
+      email: ADMIN_EMAIL,
+      password: ADMIN_PASSWORD
+    });
+    const adminToken = loginRes.data.access_token;
+
+    // 2. Rotar el token de integración de ClienGo
+    const rotateRes = await axios.post(
+      `${UQUIA_INTEGRATIONS_URL}/${INTEGRATION_ID}/rotate`,
+      { nombre: INTEGRATION_NAME },
+      {
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      }
+    );
+
+    cliengoToken = rotateRes.data?.data?.api_key;
+
+    // El token de integración vence a las 10hs. Renovamos con 1h de margen.
+    tokenExpiresAt = Date.now() + (9 * 60 * 60 * 1000);
+
+    console.log("✅ Token de integración ClienGo rotado correctamente.");
+  } catch (error) {
+    console.error("❌ Error rotando token de ClienGo:", error.response?.status, error.response?.data || error.message);
+  }
+}
+
+// Devuelve un token de integración válido, rotando si hace falta
+async function getTokenValido() {
+  const faltaPoco = !tokenExpiresAt || Date.now() >= tokenExpiresAt;
+  if (!cliengoToken || faltaPoco) {
+    await rotarTokenCliengo();
+  }
+  return cliengoToken;
+}
+
+// Rotación proactiva cada 9 horas (por si el proceso queda corriendo sin requests)
+setInterval(rotarTokenCliengo, 9 * 60 * 60 * 1000);
+
+// ===== Ruta principal =====
 app.post("/fulfillment", async (req, res) => {
   try {
     console.log("========= FULFILLMENT REQUEST =========");
@@ -17,7 +80,6 @@ app.post("/fulfillment", async (req, res) => {
 
     const body = req.body || {};
 
-    // Extracción flexible del DNI desde el chat de Cliengo
     const currentAnswer = body.currentAnswer || "";
     const textMsg = body.text || body.message || "";
     const collected = body.collected_data || {};
@@ -44,27 +106,24 @@ app.post("/fulfillment", async (req, res) => {
       });
     }
 
-    // 1. Obtener token fresco automáticamente mediante el login de administrador
-    let accessToken;
-    try {
-      const loginRes = await axios.post(UQUIA_AUTH_URL, {
-        email: "admin@uquia.com.ar",
-        password: "uquia4321$"
+    const token = await getTokenValido();
+    if (!token) {
+      console.error("No se pudo obtener un token válido de integración ClienGo.");
+      return res.status(200).json({
+        response: {
+          text: ["⚠️ Error de configuración interna. Ya estamos avisados."],
+          response_type: "TEXT",
+          stopChat: false
+        }
       });
-      accessToken = loginRes.data.access_token;
-      console.log("✅ Login OK, token obtenido:", accessToken ? accessToken.substring(0, 20) + "..." : "VACÍO");
-    } catch (loginError) {
-      console.error("❌ FALLÓ EL LOGIN:", loginError.response?.status, loginError.response?.data || loginError.message);
-      throw loginError;
     }
 
-    // 2. Consultar cliente por DNI usando la ruta oficial con el token obtenido
     let apiResponse;
     try {
       apiResponse = await axios.get(`${UQUIA_API_BASE}/clientes/get-by-dni`, {
         params: { dni: dni },
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         }
@@ -72,7 +131,43 @@ app.post("/fulfillment", async (req, res) => {
       console.log("✅ Consulta a get-by-dni OK");
     } catch (apiError) {
       console.error("❌ FALLÓ get-by-dni:", apiError.response?.status, apiError.response?.data || apiError.message);
-      throw apiError;
+
+      // Si da 401 pese a tener token en memoria, forzamos rotación y reintentamos una vez
+      if (apiError.response?.status === 401) {
+        await rotarTokenCliengo();
+        if (cliengoToken) {
+          try {
+            apiResponse = await axios.get(`${UQUIA_API_BASE}/clientes/get-by-dni`, {
+              params: { dni: dni },
+              headers: {
+                'Authorization': `Bearer ${cliengoToken}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              }
+            });
+            console.log("✅ Reintento tras rotar token OK");
+          } catch (retryError) {
+            console.error("❌ Reintento tras rotar token también falló:", retryError.response?.status, retryError.response?.data || retryError.message);
+            return res.status(200).json({
+              response: {
+                text: ["⚠️ El sistema está temporalmente fuera de línea. Probá más tarde."],
+                response_type: "TEXT",
+                stopChat: false
+              }
+            });
+          }
+        }
+      } else if (apiError.response?.status === 404) {
+        return res.status(200).json({
+          response: {
+            text: [`❌ No se encontró ningún registro para el DNI ${dni}.`],
+            response_type: "TEXT",
+            stopChat: false
+          }
+        });
+      } else {
+        throw apiError;
+      }
     }
 
     const cliente = apiResponse.data?.data || apiResponse.data;
@@ -88,7 +183,6 @@ app.post("/fulfillment", async (req, res) => {
         `• *Estado:* ${esActivo ? "Activo 🟢" : "Inactivo 🔴"}`;
     }
 
-    // Respuesta con el contrato nativo de Cliengo
     return res.status(200).json({
       response: {
         text: [textoRespuesta],
@@ -101,16 +195,11 @@ app.post("/fulfillment", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error al consultar la API de Uquia:", error.response?.status, error.response?.data || error.message);
-
-    let mensajeError = "⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo.";
-    if (error.response?.status === 404) {
-      mensajeError = `❌ No se encontró ningún registro para el DNI ingresado.`;
-    }
+    console.error("Error inesperado en /fulfillment:", error.response?.status, error.response?.data || error.message);
 
     return res.status(200).json({
       response: {
-        text: [mensajeError],
+        text: ["⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo."],
         response_type: "TEXT",
         stopChat: false
       }
@@ -119,6 +208,7 @@ app.post("/fulfillment", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Servidor intermediario iniciado en puerto ${PORT}`);
+  await rotarTokenCliengo(); // rota un token de integración apenas arranca el server
 });
