@@ -1,11 +1,13 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-
-const app = express();
 const dns = require("dns");
 
+// Preferir IPv4 antes que IPv6
 dns.setDefaultResultOrder("ipv4first");
+
+const app = express();
+
 app.use(cors());
 app.use(express.json());
 
@@ -28,26 +30,87 @@ app.get("/", (req, res) => {
 
 /*
 ====================================================
-PRUEBA DE CONEXIÓN CON UQUÍA
+TEST DNS
 ====================================================
 
-Esta ruta sirve para comprobar si Render puede
-conectarse con la API de Uquía.
+Sirve para ver qué IP está resolviendo Render
+para api.uquia.com.ar.
+*/
 
-Después del deploy podés abrir:
+app.get("/test-dns", async (req, res) => {
+  try {
+    const dnsPromises = require("dns").promises;
 
-https://TU-SERVIDOR.onrender.com/test-dni
+    const result = await dnsPromises.lookup(
+      "api.uquia.com.ar",
+      {
+        all: true
+      }
+    );
+
+    console.log("=================================");
+    console.log("DNS UQUIA DESDE RENDER");
+    console.log("=================================");
+
+    console.log(result);
+
+    return res.status(200).json({
+      ok: true,
+      hostname: "api.uquia.com.ar",
+      addresses: result
+    });
+
+  } catch (error) {
+
+    console.error("=================================");
+    console.error("ERROR DNS UQUIA");
+    console.error("=================================");
+
+    console.error("Mensaje:", error.message);
+    console.error("Código:", error.code);
+
+    return res.status(500).json({
+      ok: false,
+      message: error.message,
+      code: error.code || null
+    });
+  }
+});
+
+
+/*
+====================================================
+TEST DE CONEXIÓN CON UQUÍA
+====================================================
+
+Prueba directamente:
+
+/clientes/get-by-dni?dni=4272880
 */
 
 app.get("/test-dni", async (req, res) => {
+
   try {
+
     const dni = "4272880";
 
     console.log("=================================");
     console.log("TEST CONEXIÓN UQUIA");
-    console.log("DNI:", dni);
-    console.log("URL:", `${UQUIA_API_BASE}/clientes/get-by-dni`);
     console.log("=================================");
+
+    console.log("DNI:", dni);
+
+    console.log(
+      "URL:",
+      `${UQUIA_API_BASE}/clientes/get-by-dni`
+    );
+
+    console.log(
+      "Token configurado:",
+      process.env.UQUIA_API_TOKEN
+        ? "SÍ"
+        : "NO"
+    );
 
     const response = await axios.get(
       `${UQUIA_API_BASE}/clientes/get-by-dni`,
@@ -57,24 +120,47 @@ app.get("/test-dni", async (req, res) => {
         },
 
         headers: {
-          Authorization: `Bearer ${process.env.UQUIA_API_TOKEN}`,
-          Accept: "application/json",
-          "Content-Type": "application/json"
+          Authorization:
+            `Bearer ${process.env.UQUIA_API_TOKEN}`,
+
+          Accept:
+            "application/json",
+
+          "Content-Type":
+            "application/json"
         },
 
-        // Esperamos máximo 15 segundos
         timeout: 15000
       }
     );
 
-    console.log("Respuesta UQUIA:");
-    console.log("Status:", response.status);
-    console.log(JSON.stringify(response.data, null, 2));
+    console.log("=================================");
+    console.log("RESPUESTA UQUIA");
+    console.log("=================================");
+
+    console.log(
+      "Status:",
+      response.status
+    );
+
+    console.log(
+      JSON.stringify(
+        response.data,
+        null,
+        2
+      )
+    );
 
     return res.status(200).json({
+
       ok: true,
-      status: response.status,
-      data: response.data
+
+      status:
+        response.status,
+
+      data:
+        response.data
+
     });
 
   } catch (error) {
@@ -83,17 +169,42 @@ app.get("/test-dni", async (req, res) => {
     console.error("ERROR TEST UQUIA");
     console.error("=================================");
 
-    console.error("Mensaje:", error.message);
-    console.error("Código:", error.code);
-    console.error("Status:", error.response?.status);
-    console.error("Respuesta:", error.response?.data);
+    console.error(
+      "Mensaje:",
+      error.message
+    );
+
+    console.error(
+      "Código:",
+      error.code
+    );
+
+    console.error(
+      "Status:",
+      error.response?.status
+    );
+
+    console.error(
+      "Respuesta:",
+      error.response?.data
+    );
 
     return res.status(500).json({
+
       ok: false,
-      message: error.message,
-      code: error.code || null,
-      status: error.response?.status || null,
-      data: error.response?.data || null
+
+      message:
+        error.message,
+
+      code:
+        error.code || null,
+
+      status:
+        error.response?.status || null,
+
+      data:
+        error.response?.data || null
+
     });
   }
 });
@@ -113,25 +224,37 @@ app.post("/fulfillment", async (req, res) => {
     console.log("FULFILLMENT REQUEST");
     console.log("=================================");
 
-    console.log(JSON.stringify(req.body, null, 2));
+    console.log(
+      JSON.stringify(
+        req.body,
+        null,
+        2
+      )
+    );
 
-    const body = req.body || {};
+    const body =
+      req.body || {};
+
 
     /*
     -----------------------------------------------
-    OBTENER DATOS DEL MENSAJE
+    OBTENER DATOS
     -----------------------------------------------
     */
 
-    const currentAnswer = body.currentAnswer || "";
+    const currentAnswer =
+      body.currentAnswer || "";
+
 
     const textMsg =
       body.text ||
       body.message ||
       "";
 
+
     const collected =
       body.collected_data || {};
+
 
     /*
     -----------------------------------------------
@@ -141,8 +264,11 @@ app.post("/fulfillment", async (req, res) => {
 
     const customValues =
       typeof collected.custom === "object"
-        ? Object.values(collected.custom || {}).join(" ")
+        ? Object.values(
+            collected.custom || {}
+          ).join(" ")
         : "";
+
 
     /*
     -----------------------------------------------
@@ -151,10 +277,14 @@ app.post("/fulfillment", async (req, res) => {
     */
 
     const idNumberVal =
-      collected.idNumber?.value || "";
+      collected.idNumber?.value ||
+      "";
+
 
     const dniVal =
-      collected.dni?.value || "";
+      collected.dni?.value ||
+      "";
+
 
     /*
     -----------------------------------------------
@@ -167,18 +297,26 @@ app.post("/fulfillment", async (req, res) => {
         ? body.chat_log
         : [];
 
+
     const ultimoMensaje =
       chatLog.length > 0
         ? (
-            chatLog[chatLog.length - 1]?.message ||
-            chatLog[chatLog.length - 1]?.text ||
+            chatLog[
+              chatLog.length - 1
+            ]?.message ||
+
+            chatLog[
+              chatLog.length - 1
+            ]?.text ||
+
             ""
           )
         : "";
 
+
     /*
     -----------------------------------------------
-    ARMAMOS TODO EL TEXTO
+    ARMAR TEXTO TOTAL
     -----------------------------------------------
     */
 
@@ -191,26 +329,37 @@ app.post("/fulfillment", async (req, res) => {
       ${ultimoMensaje}
     `;
 
-    console.log("Texto analizado:");
+
+    console.log("=================================");
+    console.log("TEXTO ANALIZADO");
+    console.log("=================================");
+
     console.log(textoTotal);
+
 
     /*
     -----------------------------------------------
     BUSCAR DNI
     -----------------------------------------------
-
-    Aceptamos DNI de 7 u 8 dígitos.
     */
 
     const dniMatch =
-      textoTotal.match(/\b\d{7,8}\b/);
+      textoTotal.match(
+        /\b\d{7,8}\b/
+      );
+
 
     const dni =
       dniMatch
         ? dniMatch[0]
         : null;
 
-    console.log("DNI detectado:", dni);
+
+    console.log(
+      "DNI detectado:",
+      dni
+    );
+
 
     /*
     -----------------------------------------------
@@ -228,9 +377,11 @@ app.post("/fulfillment", async (req, res) => {
             "👋 Por favor, ingresá tu número de DNI (7 u 8 dígitos) para consultar tu estado."
           ],
 
-          response_type: "TEXT",
+          response_type:
+            "TEXT",
 
-          stopChat: false
+          stopChat:
+            false
         }
 
       });
@@ -240,38 +391,51 @@ app.post("/fulfillment", async (req, res) => {
 
     /*
     -----------------------------------------------
-    CONSULTAR API UQUIA
+    CONSULTAR UQUIA
     -----------------------------------------------
     */
 
-    console.log("Consultando Uquía...");
+    console.log("=================================");
+    console.log("CONSULTANDO UQUIA");
+    console.log("=================================");
+
     console.log(
+      "URL:",
       `${UQUIA_API_BASE}/clientes/get-by-dni`
     );
 
-    const apiResponse = await axios.get(
-      `${UQUIA_API_BASE}/clientes/get-by-dni`,
-      {
-
-        params: {
-          dni: dni
-        },
-
-        headers: {
-
-          Authorization:
-            `Bearer ${process.env.UQUIA_API_TOKEN}`,
-
-          "Content-Type":
-            "application/json",
-
-          Accept:
-            "application/json"
-        },
-
-        timeout: 15000
-      }
+    console.log(
+      "DNI:",
+      dni
     );
+
+
+    const apiResponse =
+      await axios.get(
+        `${UQUIA_API_BASE}/clientes/get-by-dni`,
+        {
+
+          params: {
+            dni: dni
+          },
+
+          headers: {
+
+            Authorization:
+              `Bearer ${process.env.UQUIA_API_TOKEN}`,
+
+            "Content-Type":
+              "application/json",
+
+            Accept:
+              "application/json"
+
+          },
+
+          timeout:
+            15000
+        }
+      );
 
 
     /*
@@ -280,7 +444,15 @@ app.post("/fulfillment", async (req, res) => {
     -----------------------------------------------
     */
 
-    console.log("Respuesta API Uquía:");
+    console.log("=================================");
+    console.log("RESPUESTA API UQUIA");
+    console.log("=================================");
+
+    console.log(
+      "Status:",
+      apiResponse.status
+    );
+
     console.log(
       JSON.stringify(
         apiResponse.data,
@@ -295,7 +467,8 @@ app.post("/fulfillment", async (req, res) => {
       apiResponse.data;
 
 
-    let textoRespuesta = "";
+    let textoRespuesta =
+      "";
 
 
     /*
@@ -350,6 +523,7 @@ app.post("/fulfillment", async (req, res) => {
             ? "Activo 🟢"
             : "Inactivo 🔴"
         }`;
+
     }
 
 
@@ -367,14 +541,17 @@ app.post("/fulfillment", async (req, res) => {
           textoRespuesta
         ],
 
-        response_type: "TEXT",
+        response_type:
+          "TEXT",
 
-        stopChat: false
+        stopChat:
+          false
       },
 
       custom: {
 
-        dni_consultado: dni
+        dni_consultado:
+          dni
 
       }
 
@@ -389,17 +566,9 @@ app.post("/fulfillment", async (req, res) => {
     -----------------------------------------------
     */
 
-    console.error(
-      "================================="
-    );
-
-    console.error(
-      "ERROR AL CONSULTAR API UQUIA"
-    );
-
-    console.error(
-      "================================="
-    );
+    console.error("=================================");
+    console.error("ERROR AL CONSULTAR API UQUIA");
+    console.error("=================================");
 
     console.error(
       "Mensaje:",
@@ -476,15 +645,20 @@ app.post("/fulfillment", async (req, res) => {
 
     /*
     -----------------------------------------------
-    TIMEOUT / RED
+    ERROR DE RED
     -----------------------------------------------
     */
 
     if (
+
       error.code === "ETIMEDOUT" ||
+
       error.code === "ECONNABORTED" ||
+
       error.code === "ENETUNREACH" ||
+
       error.code === "ECONNREFUSED"
+
     ) {
 
       mensajeError =
@@ -507,9 +681,11 @@ app.post("/fulfillment", async (req, res) => {
           mensajeError
         ],
 
-        response_type: "TEXT",
+        response_type:
+          "TEXT",
 
-        stopChat: false
+        stopChat:
+          false
       }
 
     });
@@ -534,19 +710,32 @@ app.listen(
   () => {
 
     console.log(
-      `🚀 Servidor intermediario iniciado en puerto ${PORT}`
+      "================================="
     );
 
     console.log(
-      `🌐 API Uquía: ${UQUIA_API_BASE}`
+      "🚀 SERVIDOR UQUIA INICIADO"
     );
 
     console.log(
-      `🔑 Token configurado: ${
-        process.env.UQUIA_API_TOKEN
-          ? "SÍ"
-          : "NO"
-      }`
+      "================================="
+    );
+
+    console.log(
+      "Puerto:",
+      PORT
+    );
+
+    console.log(
+      "API Uquía:",
+      UQUIA_API_BASE
+    );
+
+    console.log(
+      "Token configurado:",
+      process.env.UQUIA_API_TOKEN
+        ? "SÍ"
+        : "NO"
     );
 
   }
