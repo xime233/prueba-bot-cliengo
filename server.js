@@ -32,6 +32,8 @@ app.post("/fulfillment", async (req, res) => {
     const dniMatch = textoTotal.match(/\b\d{7,8}\b/);
     const dni = dniMatch ? dniMatch[0] : null;
 
+    console.log("🔎 DNI detectado:", dni);
+
     if (!dni) {
       return res.status(200).json({
         response: {
@@ -43,22 +45,35 @@ app.post("/fulfillment", async (req, res) => {
     }
 
     // 1. Obtener token fresco automáticamente mediante el login de administrador
-    const loginRes = await axios.post(UQUIA_AUTH_URL, {
-      email: "admin@uquia.com.ar",
-      password: "uquia4321$"
-    });
-
-    const accessToken = loginRes.data.access_token;
+    let accessToken;
+    try {
+      const loginRes = await axios.post(UQUIA_AUTH_URL, {
+        email: "admin@uquia.com.ar",
+        password: "uquia4321$"
+      });
+      accessToken = loginRes.data.access_token;
+      console.log("✅ Login OK, token obtenido:", accessToken ? accessToken.substring(0, 20) + "..." : "VACÍO");
+    } catch (loginError) {
+      console.error("❌ FALLÓ EL LOGIN:", loginError.response?.status, loginError.response?.data || loginError.message);
+      throw loginError;
+    }
 
     // 2. Consultar cliente por DNI usando la ruta oficial con el token obtenido
-    const apiResponse = await axios.get(`${UQUIA_API_BASE}/clientes/get-by-dni`, {
-      params: { dni: dni },
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
-    });
+    let apiResponse;
+    try {
+      apiResponse = await axios.get(`${UQUIA_API_BASE}/clientes/get-by-dni`, {
+        params: { dni: dni },
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+      console.log("✅ Consulta a get-by-dni OK");
+    } catch (apiError) {
+      console.error("❌ FALLÓ get-by-dni:", apiError.response?.status, apiError.response?.data || apiError.message);
+      throw apiError;
+    }
 
     const cliente = apiResponse.data?.data || apiResponse.data;
     let textoRespuesta = "";
@@ -66,7 +81,6 @@ app.post("/fulfillment", async (req, res) => {
     if (!cliente) {
       textoRespuesta = `❌ No encontramos ningún socio registrado con el DNI ${dni}.`;
     } else {
-      // Tomamos los datos que devuelve la API oficial
       const nombreCompleto = cliente.nombre_completo || `${cliente.nombre || ''} ${cliente.apellido || ''}`.trim() || 'Socio';
       const esActivo = cliente.activo !== undefined ? cliente.activo : (cliente.estado_cliente_id === 1);
 
@@ -88,7 +102,7 @@ app.post("/fulfillment", async (req, res) => {
 
   } catch (error) {
     console.error("Error al consultar la API de Uquia:", error.response?.status, error.response?.data || error.message);
-    
+
     let mensajeError = "⚠️ Ocurrió un error al consultar el sistema oficial. Intentá de nuevo.";
     if (error.response?.status === 404) {
       mensajeError = `❌ No se encontró ningún registro para el DNI ingresado.`;
