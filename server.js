@@ -1,20 +1,10 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-const https = require("https");
-const dns = require("dns");
-
-// Preferir IPv4 sobre IPv6 a nivel de resolución DNS (Node 17+)
-if (dns.setDefaultResultOrder) {
-  dns.setDefaultResultOrder("ipv4first");
-}
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Agente HTTPS forzado a IPv4, para evitar los intentos fallidos por IPv6
-const ipv4Agent = new https.Agent({ family: 4 });
 
 // ===== Configuración =====
 const UQUIA_API_BASE = 'https://api.uquia.com.ar/api/external';
@@ -31,13 +21,8 @@ const ADMIN_PASSWORD = process.env.UQUIA_ADMIN_PASSWORD;
 let cliengoToken = null;
 let tokenExpiresAt = null; // timestamp en ms
 
-// Helper para esperar entre reintentos
-const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// ===== Rotación de token de integración, con reintentos =====
-async function rotarTokenCliengo(intento = 1) {
-  const MAX_INTENTOS = 3;
-
+// ===== Rotación de token de integración =====
+async function rotarTokenCliengo() {
   if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
     console.error("⚠️ Faltan UQUIA_ADMIN_EMAIL / UQUIA_ADMIN_PASSWORD en el entorno. No se puede rotar el token.");
     return;
@@ -48,9 +33,6 @@ async function rotarTokenCliengo(intento = 1) {
     const loginRes = await axios.post(UQUIA_LOGIN_URL, {
       email: ADMIN_EMAIL,
       password: ADMIN_PASSWORD
-    }, {
-      httpsAgent: ipv4Agent,
-      timeout: 15000
     });
     const adminToken = loginRes.data.access_token;
 
@@ -63,9 +45,7 @@ async function rotarTokenCliengo(intento = 1) {
           'Authorization': `Bearer ${adminToken}`,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
-        },
-        httpsAgent: ipv4Agent,
-        timeout: 15000
+        }
       }
     );
 
@@ -76,16 +56,7 @@ async function rotarTokenCliengo(intento = 1) {
 
     console.log("✅ Token de integración ClienGo rotado correctamente.");
   } catch (error) {
-    console.error(`❌ Error rotando token de ClienGo (intento ${intento}/${MAX_INTENTOS}):`, error.code || error.response?.status, error.response?.data || error.message);
-
-    if (intento < MAX_INTENTOS) {
-      const esperaMs = intento * 2000; // 2s, 4s, 6s...
-      console.log(`⏳ Reintentando rotación en ${esperaMs / 1000}s...`);
-      await esperar(esperaMs);
-      return rotarTokenCliengo(intento + 1);
-    } else {
-      console.error("❌ Se agotaron los reintentos de rotación de token.");
-    }
+    console.error("❌ Error rotando token de ClienGo:", error.response?.status, error.response?.data || error.message);
   }
 }
 
@@ -99,12 +70,7 @@ async function getTokenValido() {
 }
 
 // Rotación proactiva cada 9 horas (por si el proceso queda corriendo sin requests)
-setInterval(() => rotarTokenCliengo(), 9 * 60 * 60 * 1000);
-
-// ===== Ruta de salud, para chequear que el server está vivo =====
-app.get("/", (req, res) => {
-  res.status(200).send("✅ Bot de ClienGo activo y funcionando.");
-});
+setInterval(rotarTokenCliengo, 9 * 60 * 60 * 1000);
 
 // ===== Ruta principal =====
 app.post("/fulfillment", async (req, res) => {
@@ -145,7 +111,7 @@ app.post("/fulfillment", async (req, res) => {
       console.error("No se pudo obtener un token válido de integración ClienGo.");
       return res.status(200).json({
         response: {
-          text: ["⚠️ El sistema está temporalmente fuera de línea. Probá en unos minutos."],
+          text: ["⚠️ Error de configuración interna. Ya estamos avisados."],
           response_type: "TEXT",
           stopChat: false
         }
@@ -160,13 +126,11 @@ app.post("/fulfillment", async (req, res) => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
-        },
-        httpsAgent: ipv4Agent,
-        timeout: 15000
+        }
       });
       console.log("✅ Consulta a get-by-dni OK");
     } catch (apiError) {
-      console.error("❌ FALLÓ get-by-dni:", apiError.code || apiError.response?.status, apiError.response?.data || apiError.message);
+      console.error("❌ FALLÓ get-by-dni:", apiError.response?.status, apiError.response?.data || apiError.message);
 
       // Si da 401 pese a tener token en memoria, forzamos rotación y reintentamos una vez
       if (apiError.response?.status === 401) {
@@ -179,13 +143,11 @@ app.post("/fulfillment", async (req, res) => {
                 'Authorization': `Bearer ${cliengoToken}`,
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
-              },
-              httpsAgent: ipv4Agent,
-              timeout: 15000
+              }
             });
             console.log("✅ Reintento tras rotar token OK");
           } catch (retryError) {
-            console.error("❌ Reintento tras rotar token también falló:", retryError.code || retryError.response?.status, retryError.response?.data || retryError.message);
+            console.error("❌ Reintento tras rotar token también falló:", retryError.response?.status, retryError.response?.data || retryError.message);
             return res.status(200).json({
               response: {
                 text: ["⚠️ El sistema está temporalmente fuera de línea. Probá más tarde."],
@@ -204,14 +166,7 @@ app.post("/fulfillment", async (req, res) => {
           }
         });
       } else {
-        // Timeout, ENETUNREACH, ETIMEDOUT u otro error de red
-        return res.status(200).json({
-          response: {
-            text: ["⚠️ Ocurrió un error de conexión con el sistema oficial. Intentá de nuevo en unos instantes."],
-            response_type: "TEXT",
-            stopChat: false
-          }
-        });
+        throw apiError;
       }
     }
 
