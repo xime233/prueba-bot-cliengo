@@ -2,7 +2,53 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const dns = require("dns");
+const https = require("https");
 
+app.get("/test-ip", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://api.uquia.com.ar/api/external/clientes/get-by-dni",
+      {
+        params: {
+          dni: "4272880"
+        },
+
+        headers: {
+          Authorization: `Bearer ${process.env.UQUIA_API_TOKEN}`,
+          Accept: "application/json"
+        },
+
+        timeout: 15000,
+
+        httpsAgent: new https.Agent({
+          lookup: (hostname, options, callback) => {
+            callback(null, "77.37.85.203", 4);
+          }
+        })
+      }
+    );
+
+    res.json({
+      ok: true,
+      status: response.status,
+      data: response.data
+    });
+
+  } catch (error) {
+    console.error("TEST IP ERROR:", error.message);
+    console.error("CODE:", error.code);
+    console.error("STATUS:", error.response?.status);
+    console.error("DATA:", error.response?.data);
+
+    res.status(500).json({
+      ok: false,
+      message: error.message,
+      code: error.code || null,
+      status: error.response?.status || null,
+      data: error.response?.data || null
+    });
+  }
+}); 
 // Preferir IPv4 antes que IPv6
 dns.setDefaultResultOrder("ipv4first");
 
