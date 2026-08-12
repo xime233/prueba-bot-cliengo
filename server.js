@@ -3,7 +3,9 @@ const cors = require("cors");
 const axios = require("axios");
 
 const app = express();
+const dns = require("dns");
 
+dns.setDefaultResultOrder("ipv4first");
 app.use(cors());
 app.use(express.json());
 
